@@ -1,504 +1,174 @@
-# Printing Setup: Linux Server to Windows 11 Client
+# Printing Setup: Linux Laravel Server to Windows USB Printer (Python Only)
 
-This guide explains how to set up printing from your Laravel application running on Ubuntu Linux (`http://louna.lccdo.edu.ph`) to a receipt printer connected to a Windows 11 computer.
+This project supports HTTP printing through the Python print server at PrintServer/print-server.py.
 
-## Architecture
+Do not use Node.js print-server variants for this project documentation.
 
+## 1. Architecture
+
+Ubuntu/Linux Laravel server -> Windows PC (Python print server) -> USB EPSON TM-T82II
+
+- Laravel sends POST /print
+- Windows Python service checks printer health at /health
+- Printer is connected to Windows through USB
+
+## 2. Linux Laravel Configuration
+
+Set these values in .env:
+
+```dotenv
+PRINTER_ENABLED=true
+SKIP_PRINTER_VALIDATION=false
+PRINTER_TYPE=http
+PRINTER_TARGET=http://WINDOWS_IP:3000/print
+PRINTER_PORT=9100
 ```
-Ubuntu Server (Laravel)  →  Windows 11 Computer  →  EPSON TM-T82II Receipt Printer
-  (louna.lccdo.edu.ph)         (Kiosk Station)         (USB/Network)
-```
 
-## Solution: HTTP Print API (Recommended)
+Notes:
+- Replace WINDOWS_IP with the actual Windows PC IP
+- Keep SKIP_PRINTER_VALIDATION=false in production
+- Validation uses /health and blocks ticket creation when printer is unavailable
 
-The most reliable approach is to create a simple print service on the Windows 11 computer that receives print jobs via HTTP.
+## 3. Windows PC Setup (Python)
 
----
+Follow all steps in [WINDOWS_PRINT_SERVER.md](WINDOWS_PRINT_SERVER.md).
 
-## Step 1: Install Print Service on Windows 11
+Summary:
 
-### Option A: Using Node.js (Recommended)
-
-1. **Install Node.js on Windows 11:**
-   - Download from: https://nodejs.org/
-   - Install the LTS version
-
-2. **Create print server directory:**
-   ```powershell
-   mkdir C:\PrintServer
-   cd C:\PrintServer
-   ```
-
-3. **Initialize Node.js project:**
-   ```powershell
-   npm init -y
-   npm install express body-parser node-thermal-printer
-   ```
-
-4. **Create `print-server.js`:**
-   ```javascript
-   const express = require('express');
-   const bodyParser = require('body-parser');
-   const { ThermalPrinter, PrinterTypes } = require('node-thermal-printer');
-
-   const app = express();
-   app.use(bodyParser.json());
-   app.use(bodyParser.text({ type: 'text/plain', limit: '10mb' }));
-
-   // Configure your printer
-   const printer = new ThermalPrinter({
-       type: PrinterTypes.EPSON,
-       interface: 'printer:EPSON TM-T82II Receipt', // Your printer name
-       characterSet: 'PC437_USA',
-       removeSpecialCharacters: false,
-       lineCharacter: "=",
-       breakLine: "\n",
-   });
-
-   app.post('/print', async (req, res) => {
-       try {
-           console.log('Received print job');
-           
-           const printData = req.body;
-           
-           // Clear any previous data
-           printer.clear();
-           
-           // Print header/logo
-           if (printData.logo) {
-               printer.alignCenter();
-               printer.println('LOURDES COLLEGE, INC.');
-               printer.newLine();
-           }
-           
-           // Print ticket number
-           printer.alignCenter();
-           printer.setTextSize(2, 2);
-           printer.bold(true);
-           printer.println(printData.code || 'TICKET');
-           printer.bold(false);
-           printer.setTextNormal();
-           printer.newLine();
-           
-           // Print service type
-           printer.alignLeft();
-           printer.println('Service: ' + (printData.service || 'N/A'));
-           printer.println('Priority: ' + (printData.priority || 'N/A'));
-           printer.println('Time: ' + (printData.time || new Date().toLocaleString()));
-           printer.newLine();
-           
-           // Print footer
-           printer.alignCenter();
-           printer.println('Please wait for your number');
-           printer.println('to be called.');
-           printer.newLine();
-           printer.newLine();
-           
-           // Cut paper
-           printer.cut();
-           
-           // Send to printer
-           await printer.execute();
-           
-           console.log('Print job completed');
-           res.json({ success: true, message: 'Printed successfully' });
-           
-       } catch (error) {
-           console.error('Print error:', error);
-           res.status(500).json({ success: false, error: error.message });
-       }
-   });
-
-   // Health check endpoint
-   app.get('/status', (req, res) => {
-       res.json({ status: 'online', printer: 'EPSON TM-T82II Receipt' });
-   });
-
-   const PORT = 3000;
-   app.listen(PORT, '0.0.0.0', () => {
-       console.log(`Print server running on http://0.0.0.0:${PORT}`);
-       console.log('Ready to receive print jobs from Laravel server');
-   });
-   ```
-
-5. **Test the print server:**
-   ```powershell
-   node print-server.js
-   ```
-
-6. **Test from browser:**
-   Open: `http://localhost:3000/status`
-
-### Option B: Using Python (Alternative)
-
-1. **Install Python 3:**
-   - Download from: https://www.python.org/
-
-2. **Create `print_server.py`:**
-   ```python
-   from flask import Flask, request, jsonify
-   import win32print
-   import win32ui
-   from PIL import Image, ImageDraw, ImageFont
-   import io
-
-   app = Flask(__name__)
-
-   PRINTER_NAME = "EPSON TM-T82II Receipt"
-
-   @app.route('/print', methods=['POST'])
-   def print_ticket():
-       try:
-           data = request.json
-           code = data.get('code', 'TICKET')
-           service = data.get('service', 'N/A')
-           priority = data.get('priority', 'N/A')
-           
-           # Create print job
-           hprinter = win32print.OpenPrinter(PRINTER_NAME)
-           hdc = win32ui.CreateDC()
-           hdc.CreatePrinterDC(PRINTER_NAME)
-           
-           hdc.StartDoc("Queue Ticket")
-           hdc.StartPage()
-           
-           # Print content (simplified)
-           hdc.TextOut(100, 100, f"Code: {code}")
-           hdc.TextOut(100, 200, f"Service: {service}")
-           hdc.TextOut(100, 300, f"Priority: {priority}")
-           
-           hdc.EndPage()
-           hdc.EndDoc()
-           
-           win32print.ClosePrinter(hprinter)
-           
-           return jsonify({"success": True, "message": "Printed successfully"})
-       
-       except Exception as e:
-           return jsonify({"success": False, "error": str(e)}), 500
-
-   @app.route('/status', methods=['GET'])
-   def status():
-       return jsonify({"status": "online", "printer": PRINTER_NAME})
-
-   if __name__ == '__main__':
-       app.run(host='0.0.0.0', port=3000)
-   ```
-
-3. **Install dependencies:**
-   ```powershell
-   pip install flask pywin32 Pillow
-   ```
-
-4. **Run:**
-   ```powershell
-   python print_server.py
-   ```
-
----
-
-## Step 2: Run Print Server as Windows Service
-
-To ensure the print server starts automatically with Windows:
-
-### Using NSSM (Non-Sucking Service Manager)
-
-1. **Download NSSM:**
-   - Download from: https://nssm.cc/download
-
-2. **Install as service:**
-   ```powershell
-   nssm install PrintServer "C:\Program Files\nodejs\node.exe" "C:\PrintServer\print-server.js"
-   nssm set PrintServer AppDirectory C:\PrintServer
-   nssm set PrintServer DisplayName "Queue System Print Server"
-   nssm set PrintServer Description "Receives print jobs from Laravel queueing system"
-   nssm set PrintServer Start SERVICE_AUTO_START
-   nssm start PrintServer
-   ```
-
-3. **Check service status:**
-   ```powershell
-   nssm status PrintServer
-   ```
-
----
-
-## Step 3: Configure Windows Firewall
-
-Allow incoming connections on port 3000:
+1. Install Python 3.11+
+2. Create C:\PrintServer
+3. Copy PrintServer/print-server.py to C:\PrintServer\print-server.py
+4. (Optional) copy Lourdes_final.png for logo printing
+5. Create virtual environment and install packages:
 
 ```powershell
-New-NetFirewallRule -DisplayName "Print Server" -Direction Inbound -Protocol TCP -LocalPort 3000 -Action Allow
+cd C:\PrintServer
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install flask pywin32 pillow
 ```
 
-Or use Windows Firewall GUI:
-1. Open Windows Defender Firewall
-2. Advanced Settings
-3. Inbound Rules → New Rule
-4. Port → TCP → 3000 → Allow the connection
+6. Confirm PRINTER_NAME matches installed Windows printer name
+7. Start server:
 
----
-
-## Step 4: Update Laravel Application on Ubuntu Server
-
-### Update `.env` file:
-
-```ini
-PRINTER_ENABLED=true
-PRINTER_TYPE=http
-PRINTER_TARGET=http://192.168.1.100:3000/print
+```powershell
+python C:\PrintServer\print-server.py
 ```
 
-Replace `192.168.1.100` with your Windows 11 computer's IP address.
+8. Allow inbound TCP 3000 in Windows Firewall
 
-### Update `KioskController.php`:
+## 4. Endpoint Behavior
 
-Add this method to handle HTTP printing:
+### 4.1 GET /health
 
-```php
-protected function printTicket(QueueTicket $ticket)
-{
-    try {
-        Log::info('Starting print job for ticket: ' . $ticket->code);
-        
-        $printerType = config('app.printer_type', 'windows');
-        
-        if ($printerType === 'http') {
-            return $this->printViaHttp($ticket);
-        }
-        
-        // Original ESC/POS printing logic for local Windows
-        // ... existing code ...
-        
-    } catch (\Throwable $e) {
-        Log::error('Print failed: ' . $e->getMessage());
-    }
-}
+Used by Laravel before issuing ticket when printer validation is enabled.
 
-protected function printViaHttp(QueueTicket $ticket)
-{
-    try {
-        $printerUrl = config('app.printer_target');
-        
-        if (!$printerUrl) {
-            Log::error('PRINTER_TARGET not configured in .env');
-            return;
-        }
-        
-        // Prepare print data
-        $printData = [
-            'code' => $ticket->code,
-            'service' => ucfirst($ticket->service_type),
-            'priority' => ucfirst(str_replace('_', ' ', $ticket->priority)),
-            'time' => $ticket->created_at->format('Y-m-d H:i:s'),
-            'logo' => true,
-        ];
-        
-        // Send HTTP request to Windows print server
-        $response = \Illuminate\Support\Facades\Http::timeout(5)
-            ->post($printerUrl, $printData);
-        
-        if ($response->successful()) {
-            Log::info('Print job sent successfully via HTTP');
-        } else {
-            Log::error('Print server returned error: ' . $response->body());
-        }
-        
-    } catch (\Throwable $e) {
-        Log::error('HTTP print failed: ' . $e->getMessage());
-    }
-}
-```
+Expected JSON fields:
+- printer
+- can_print (true/false)
+- issues (array)
+- raw_status (integer status bits)
 
-### Update `config/app.php`:
+When can_print=false, kiosk ticket issuance is blocked to avoid unprinted tickets.
 
-Add printer configuration:
+### 4.2 POST /print
 
-```php
-'printer_enabled' => env('PRINTER_ENABLED', false),
-'printer_type' => env('PRINTER_TYPE', 'windows'),
-'printer_target' => env('PRINTER_TARGET', ''),
-'printer_port' => env('PRINTER_PORT', 9100),
-```
+Expected payload:
 
----
-
-## Step 5: Test the Setup
-
-### From Ubuntu Server:
-
-```bash
-curl -X POST http://192.168.1.100:3000/print \
-  -H "Content-Type: application/json" \
-  -d '{
-    "code": "CS-001",
-    "service": "Cashier",
-    "priority": "Student",
-    "time": "2025-12-09 10:30:00"
-  }'
-```
-
-Expected response:
 ```json
-{"success": true, "message": "Printed successfully"}
+{
+  "ticket": {
+    "code": "CS-001",
+    "service_type": "cashier",
+    "priority": "student",
+    "created_at": "2026-01-01T08:00:00+08:00"
+  }
+}
 ```
 
-### From Laravel:
+Success response:
 
-Access the kiosk and generate a ticket. Check the Laravel logs:
+```json
+{
+  "success": true,
+  "job_id": 123
+}
+```
+
+## 5. Connectivity and Functional Tests
+
+### 5.1 From Windows PC
+
+```powershell
+curl http://localhost:3000/health
+```
+
+### 5.2 From Linux server
 
 ```bash
-tail -f /var/www/html/queueing_system/storage/logs/laravel.log
+curl http://WINDOWS_IP:3000/health
+
+curl -X POST http://WINDOWS_IP:3000/print \
+  -H "Content-Type: application/json" \
+  -d '{"ticket":{"code":"CS-001","service_type":"cashier","priority":"student","created_at":"2026-01-01T08:00:00+08:00"}}'
 ```
 
----
+### 5.3 From Laravel app
 
-## Troubleshooting
+1. Open kiosk
+2. Generate ticket
+3. Check Laravel log for health/print records:
 
-### Print server not accessible from Ubuntu:
+```bash
+tail -f storage/logs/laravel.log
+```
 
-1. **Check Windows IP:**
-   ```powershell
-   ipconfig
-   ```
+## 6. Run Automatically on Windows Boot (Recommended)
 
-2. **Test connectivity:**
-   ```bash
-   ping 192.168.1.100
-   telnet 192.168.1.100 3000
-   ```
+Use the Startup folder method (shell:startup) to auto-run C:\PrintServer\print-server.py at boot.
 
-3. **Check firewall:**
-   ```powershell
-   Get-NetFirewallRule | Where-Object {$_.DisplayName -like "*Print*"}
-   ```
+See full steps in [WINDOWS_PRINT_SERVER.md](WINDOWS_PRINT_SERVER.md).
 
-### Printer not found:
+## 7. Troubleshooting
 
-1. **List available printers:**
-   ```powershell
-   Get-Printer | Format-Table Name, DriverName
-   ```
+### 7.1 /health cannot be reached
 
-2. **Update printer name in `print-server.js`:**
-   ```javascript
-   interface: 'printer:YOUR_EXACT_PRINTER_NAME'
-   ```
+1. Verify Python print process is running after boot
+2. Check firewall rule for TCP 3000
+3. Verify Windows IP and network/subnet
+4. Test from both Windows and Linux hosts
 
-### Print server crashes:
+### 7.2 /health returns can_print=false
 
-1. **Check logs:**
-   ```powershell
-   Get-EventLog -LogName Application -Source "Print Server" -Newest 10
-   ```
+1. Confirm printer power and USB cable
+2. Confirm paper and cover status
+3. Confirm PRINTER_NAME exact match via Get-Printer
+4. Clear stuck print jobs and restart print spooler if needed
 
-2. **Restart service:**
-   ```powershell
-   nssm restart PrintServer
-   ```
+### 7.3 /print fails
 
-### Laravel not sending print jobs:
+1. Verify pywin32 installed in active environment
+2. Run script in foreground and inspect console traceback
+3. Ensure printer is not offline/paused in Windows printer queue
 
-1. **Check Laravel logs:**
-   ```bash
-   tail -f /var/www/html/queueing_system/storage/logs/laravel.log
-   ```
+### 7.4 Laravel still does not print
 
-2. **Test HTTP client:**
-   ```bash
-   php artisan tinker
-   >>> \Illuminate\Support\Facades\Http::get('http://192.168.1.100:3000/status')
-   ```
+1. Confirm PRINTER_TYPE=http
+2. Confirm PRINTER_TARGET points to /print endpoint
+3. Confirm SKIP_PRINTER_VALIDATION is correct for the environment
+4. Review Laravel logs for HTTP connection/timeout errors
 
----
+## 8. Security Recommendations
 
-## Network Configuration Tips
+1. Restrict firewall rule to Laravel server IP
+2. Keep print server on private network only
+3. Do not expose port 3000 to public internet
+4. Use strong host hardening on Windows machine
 
-### Static IP for Windows 11 Computer:
+## 9. Operational Recommendation
 
-Set a static IP to avoid changes after DHCP lease renewal:
+Standardize on a single print server implementation:
+- PrintServer/print-server.py
 
-1. Open Settings → Network & Internet → Ethernet/WiFi
-2. Click on your connection
-3. IP assignment → Edit → Manual
-4. Set static IP (e.g., 192.168.1.100)
-5. Update `.env` on Ubuntu server
-
-### DNS Resolution (Optional):
-
-Instead of using IP addresses, configure local DNS:
-
-1. **Add to Ubuntu's `/etc/hosts`:**
-   ```
-   192.168.1.100  print-server.local
-   ```
-
-2. **Update `.env`:**
-   ```ini
-   PRINTER_TARGET=http://print-server.local:3000/print
-   ```
-
----
-
-## Security Considerations
-
-1. **Use HTTPS (Recommended for production):**
-   - Install SSL certificate on print server
-   - Use reverse proxy (nginx) on Windows
-
-2. **Add authentication:**
-   - Implement API key validation
-   - Use VPN for printer network
-
-3. **Restrict access:**
-   - Configure firewall to only allow Laravel server IP
-   - Use private VLAN for kiosk/printer network
-
----
-
-## Alternative: Direct Network Printing
-
-If your EPSON TM-T82II has network capability:
-
-1. **Connect printer to network via Ethernet**
-
-2. **Find printer IP:**
-   - Print network configuration from printer
-   - Or check router DHCP leases
-
-3. **Update `.env`:**
-   ```ini
-   PRINTER_ENABLED=true
-   PRINTER_TYPE=network
-   PRINTER_TARGET=192.168.1.50
-   PRINTER_PORT=9100
-   ```
-
-4. **Use raw socket printing in PHP:**
-   ```php
-   $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
-   socket_connect($socket, '192.168.1.50', 9100);
-   socket_write($socket, $escposCommands);
-   socket_close($socket);
-   ```
-
-This eliminates the need for the Windows computer entirely.
-
----
-
-## Summary
-
-**Recommended Setup:**
-- HTTP Print API on Windows 11 (most flexible and reliable)
-- NSSM service for automatic startup
-- Static IP for Windows computer
-- Firewall rule for port 3000
-
-This approach provides:
-✅ Reliable network printing  
-✅ Easy troubleshooting  
-✅ Works across different OSes  
-✅ Centralized print management  
-✅ Can support multiple printers  
-
-For support or issues, check the print server logs and Laravel logs as shown in the troubleshooting section.
+This keeps printer health checks and payload format aligned with the current Laravel printing logic.

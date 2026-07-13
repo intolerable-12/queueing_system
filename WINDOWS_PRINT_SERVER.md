@@ -1,274 +1,229 @@
-# Windows Print Server Setup Guide
+# Windows Print Server Setup Guide (Python Only)
 
-This guide explains how to set up the Windows 11 computer (IP: 192.168.138.20) as a print server for the Linux Ubuntu server.
+This guide configures the Windows PC that has the USB-connected EPSON TM-T82II printer.
 
-## Overview
+Supported print server for this project:
+- PrintServer/print-server.py
 
-The architecture is:
-- **Linux Server** (192.168.138.30) - Runs Laravel app with LAMP stack
-- **Windows Client** (192.168.138.20) - Connected to EPSON TM-T82II Receipt printer
-- Communication via HTTP API
+Do not use Node.js print server variants. The Laravel app is documented for the Python service below.
 
-## Step 1: Install Node.js on Windows 11
+## 1. Architecture
 
-1. Download Node.js LTS from https://nodejs.org/
-2. Run the installer and follow the prompts
-3. Verify installation:
-   ```cmd
-   node --version
-   npm --version
-   ```
+- Linux Laravel server sends HTTP print requests
+- Windows PC runs Python Flask print server
+- USB-connected EPSON TM-T82II prints receipts
 
-## Step 2: Create Print Server Directory
+Flow:
 
-```cmd
-cd C:\
-mkdir PrintServer
-cd PrintServer
+Linux (Laravel) -> http://WINDOWS_IP:3000/print -> Windows Python print server -> USB printer
+
+## 2. Requirements on Windows PC
+
+1. Windows 10 or Windows 11
+2. Printer driver installed and printer visible in Windows Printers
+3. Python 3.11+ (recommended)
+4. Network access from Linux server to Windows port 3000
+
+## 3. Install Python on Windows
+
+1. Download Python from https://www.python.org/downloads/windows/
+2. Run installer
+3. Enable these installer options:
+   - Add python.exe to PATH
+   - Install launcher for all users (recommended)
+   - Disable path length limit (recommended)
+4. Verify in PowerShell:
+
+```powershell
+python --version
+pip --version
 ```
 
-## Step 3: Copy Print Server Files
+If python is not recognized, reopen PowerShell and try again.
 
-Copy the `print-server.js` file from your project to `C:\PrintServer\`
+## 4. Prepare Print Server Folder
 
-## Step 4: Initialize Node.js Project
+1. Create folder:
 
-```cmd
+```powershell
+New-Item -ItemType Directory -Path C:\PrintServer -Force
+```
+
+2. Copy these files from the project to C:\PrintServer:
+   - PrintServer/print-server.py
+   - public/images/Lourdes_final.png (optional but recommended for logo printing)
+
+3. Verify files:
+
+```powershell
+Get-ChildItem C:\PrintServer
+```
+
+## 5. Create Virtual Environment (Recommended)
+
+```powershell
 cd C:\PrintServer
-npm init -y
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 ```
 
-## Step 5: Install Dependencies
+If execution policy blocks activation:
 
-```cmd
-npm install express body-parser printer
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
 ```
 
-## Step 6: Verify Printer Name
+## 6. Install Python Packages
 
-Open PowerShell and check your printer name:
+```powershell
+python -m pip install --upgrade pip
+pip install flask pywin32 pillow
+```
+
+Package purpose:
+- flask: HTTP API server
+- pywin32: Windows print spooler access
+- pillow: image processing/logo rasterization
+
+## 7. Confirm Printer Name
+
+The script default is:
+
+```python
+PRINTER_NAME = "EPSON TM-T82II Receipt"
+```
+
+Check actual installed name:
 
 ```powershell
 Get-Printer | Select-Object Name
 ```
 
-If the printer name is different from "EPSON TM-T82II Receipt", edit `print-server.js` and update the `PRINTER_NAME` constant.
+If different, edit C:\PrintServer\print-server.py and update PRINTER_NAME exactly.
 
-## Step 7: Configure Windows Firewall
-
-Allow incoming connections on port 3000:
+## 8. Start the Python Print Server
 
 ```powershell
-# Run PowerShell as Administrator
-New-NetFirewallRule -DisplayName "Print Server Port 3000" -Direction Inbound -LocalPort 3000 -Protocol TCP -Action Allow
-```
-
-Or manually:
-1. Open Windows Defender Firewall
-2. Click "Advanced settings"
-3. Click "Inbound Rules" → "New Rule"
-4. Select "Port" → Next
-5. Select "TCP" and enter "3000" → Next
-6. Select "Allow the connection" → Next
-7. Select all profiles → Next
-8. Name it "Print Server Port 3000" → Finish
-
-## Step 8: Test the Print Server
-
-1. Start the server:
-   ```cmd
-   cd C:\PrintServer
-   node print-server.js
-   ```
-
-2. You should see:
-   ```
-   ==================================================
-   Windows Print Server Started
-   ==================================================
-   Server running on: http://0.0.0.0:3000
-   Printer: EPSON TM-T82II Receipt
-   Access from network: http://192.168.138.20:3000
-   ```
-
-3. Test from Windows browser:
-   - Open browser and go to: http://localhost:3000/health
-   - You should see: `{"status":"online","printer":"EPSON TM-T82II Receipt","timestamp":"..."}`
-
-4. Test from Linux server:
-   ```bash
-   curl http://192.168.138.20:3000/health
-   ```
-
-## Step 9: Set Up as Windows Service (Auto-start)
-
-To keep the print server running even after restart:
-
-### Option A: Using NSSM (Non-Sucking Service Manager)
-
-1. Download NSSM from https://nssm.cc/download
-2. Extract to `C:\nssm\`
-3. Open PowerShell as Administrator:
-
-```powershell
-cd C:\nssm\win64
-
-# Install service
-.\nssm.exe install PrintServer "C:\Program Files\nodejs\node.exe" "C:\PrintServer\print-server.js"
-
-# Configure service
-.\nssm.exe set PrintServer AppDirectory "C:\PrintServer"
-.\nssm.exe set PrintServer DisplayName "Queue System Print Server"
-.\nssm.exe set PrintServer Description "HTTP Print Server for Queue Management System"
-.\nssm.exe set PrintServer Start SERVICE_AUTO_START
-
-# Start service
-.\nssm.exe start PrintServer
-```
-
-4. Verify service is running:
-```powershell
-Get-Service PrintServer
-```
-
-### Option B: Using PM2
-
-1. Install PM2 globally:
-```cmd
-npm install -g pm2
-npm install -g pm2-windows-startup
-```
-
-2. Configure PM2 to start on boot:
-```cmd
-pm2-startup install
-```
-
-3. Start the print server with PM2:
-```cmd
 cd C:\PrintServer
-pm2 start print-server.js --name "PrintServer"
-pm2 save
+.\.venv\Scripts\Activate.ps1
+python print-server.py
 ```
 
-4. Manage the service:
-```cmd
-pm2 status          # Check status
-pm2 restart PrintServer  # Restart
-pm2 stop PrintServer     # Stop
-pm2 logs PrintServer     # View logs
+Expected service endpoint:
+- Health: http://localhost:3000/health
+- Print: POST http://localhost:3000/print
+
+## 9. Test Endpoints on Windows
+
+Health test:
+
+```powershell
+curl http://localhost:3000/health
 ```
 
-## Step 10: Test Print from Linux Server
+Expected fields include can_print, issues, raw_status.
 
-SSH into your Linux server and test:
+Print test:
+
+```powershell
+curl -Method Post -Uri http://localhost:3000/print -ContentType "application/json" -Body '{"ticket":{"code":"CS-001","service_type":"cashier","priority":"student","created_at":"2026-01-01T08:00:00+08:00"}}'
+```
+
+## 10. Open Windows Firewall Port 3000
+
+Allow only the Laravel server IP when possible:
+
+```powershell
+New-NetFirewallRule -DisplayName "Queue Print Server 3000" -Direction Inbound -Protocol TCP -LocalPort 3000 -Action Allow -RemoteAddress 192.168.138.30
+```
+
+If you need temporary broad access for testing:
+
+```powershell
+New-NetFirewallRule -DisplayName "Queue Print Server 3000 (Any)" -Direction Inbound -Protocol TCP -LocalPort 3000 -Action Allow
+```
+
+## 11. Configure Auto-Run on Windows Boot (shell:startup)
+
+This project uses the Startup folder approach.
+
+### Startup Folder Setup
+
+1. Create C:\PrintServer\start-print-server.bat with this content:
+
+```bat
+@echo off
+cd /d C:\PrintServer
+call C:\PrintServer\.venv\Scripts\activate.bat
+python C:\PrintServer\print-server.py
+```
+
+2. Open Startup folder:
+
+```powershell
+explorer shell:startup
+```
+
+3. Put a shortcut of C:\PrintServer\start-print-server.bat in that Startup folder.
+4. Reboot Windows and verify the process is listening on port 3000.
+
+## 12. Test from Linux Server
 
 ```bash
-curl -X POST http://192.168.138.20:3000/print \
+curl http://WINDOWS_IP:3000/health
+
+curl -X POST http://WINDOWS_IP:3000/print \
   -H "Content-Type: application/json" \
-  -d '{
-    "ticket": {
-      "code": "CS-001",
-      "service_type": "cashier",
-      "priority": "student",
-      "created_at": "2025-12-12T10:30:00Z"
-    }
-  }'
+  -d '{"ticket":{"code":"CS-001","service_type":"cashier","priority":"student","created_at":"2026-01-01T08:00:00+08:00"}}'
 ```
 
-If successful, the printer should print a test ticket.
+## 13. Laravel .env (Linux)
 
-## Troubleshooting
-
-### Print server won't start
-- Check if port 3000 is already in use: `netstat -ano | findstr :3000`
-- Check Node.js installation: `node --version`
-- Check printer is online: `Get-Printer | Where-Object {$_.Name -eq "EPSON TM-T82II Receipt"}`
-
-### Can't connect from Linux server
-- Verify Windows firewall rule is active
-- Ping Windows from Linux: `ping 192.168.138.20`
-- Test health endpoint: `curl http://192.168.138.20:3000/health`
-- Check Windows Defender isn't blocking connections
-
-### Printer not printing
-- Ensure printer is turned on and connected
-- Check printer status in Windows: `Get-Printer | Format-List`
-- Verify printer name matches in `print-server.js`
-- Check printer queue for errors
-
-### Service won't start automatically
-- If using NSSM: Check service status in `services.msc`
-- If using PM2: Run `pm2 save` after starting
-- Check Windows Event Viewer for errors
-
-## Monitoring
-
-### View Print Server Logs
-
-If using PM2:
-```cmd
-pm2 logs PrintServer
+```dotenv
+PRINTER_ENABLED=true
+SKIP_PRINTER_VALIDATION=false
+PRINTER_TYPE=http
+PRINTER_TARGET=http://WINDOWS_IP:3000/print
+PRINTER_PORT=9100
 ```
 
-If using NSSM:
-Check Event Viewer → Windows Logs → Application
+## 14. Troubleshooting
 
-### Check Service Status
+### A. Health says can_print=false
 
-```powershell
-# For NSSM service
-Get-Service PrintServer
+1. Check printer power and USB connection
+2. Check paper state and cover state
+3. Confirm PRINTER_NAME matches Get-Printer output
+4. Restart Windows Print Spooler service
 
-# For PM2
-pm2 status
-```
+### B. Linux cannot reach Windows
 
-## Network Configuration
+1. Verify Windows IP with ipconfig
+2. Verify firewall rule and remote address scope
+3. Test ping and curl from Linux
+4. Ensure both devices are on same network/subnet
 
-Ensure both computers are on the same network:
-- **Linux Server**: 192.168.138.30
-- **Windows Client**: 192.168.138.20
-- Subnet mask: 255.255.255.0 (typically)
+### C. Print endpoint returns error
 
-To verify connectivity:
-```bash
-# From Linux
-ping 192.168.138.20
-curl http://192.168.138.20:3000/health
-```
+1. Run script in foreground and inspect console errors
+2. Verify pywin32 installed in active environment
+3. Ensure printer is not paused/offline in Windows queue
 
-## Security Considerations
+### D. Auto-run at boot does not start
 
-1. **Firewall**: Only allow connections from the Linux server IP
-   ```powershell
-   New-NetFirewallRule -DisplayName "Print Server from Linux" -Direction Inbound -LocalPort 3000 -Protocol TCP -Action Allow -RemoteAddress 192.168.138.30
-   ```
+1. Validate python path and working directory in your Startup config
+2. Start script manually first to confirm runtime dependencies
+3. If using Startup folder, ensure shortcut points to start-print-server.bat
 
-2. **Authentication**: Consider adding API key authentication in production
+## 15. Maintenance
 
-3. **Network**: Ensure both servers are on a private network, not exposed to internet
+1. Stop startup task/process
+2. Replace C:\PrintServer\print-server.py
+3. Start startup task/process
+4. Re-test /health and one sample /print
 
-## Maintenance
-
-### Update Print Server
-```cmd
-cd C:\PrintServer
-# Stop service first
-pm2 stop PrintServer  # or stop NSSM service
-
-# Update code
-# Copy new print-server.js
-
-# Restart
-pm2 start PrintServer  # or start NSSM service
-```
-
-### Backup Configuration
-Regularly backup:
-- `C:\PrintServer\print-server.js`
-- PM2 process list: `pm2 save`
-
----
-
-**Support**: If issues persist, check the printer manual and ensure ESC/POS commands are compatible with your EPSON model.
+Backup these files:
+- C:\PrintServer\print-server.py
+- C:\PrintServer\Lourdes_final.png (if used)
+- Startup folder shortcut/configuration notes

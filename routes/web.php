@@ -24,12 +24,12 @@ Route::post('/kiosk/service', [KioskController::class, 'chooseService'])->name('
 Route::get('/kiosk/registrar/programs', [KioskController::class, 'showRegistrarPrograms'])->name('kiosk.registrarPrograms');
 // Gracefully handle accidental GETs to POST-only routes
 Route::get('/kiosk/service', function () {
-	return redirect()->route('kiosk.index');
+    return redirect()->route('kiosk.index');
 });
 Route::post('/kiosk/priority', [KioskController::class, 'choosePriority'])->name('kiosk.priority');
 Route::post('/kiosk/issue', [KioskController::class, 'issueTicket'])->name('kiosk.issue');
 Route::get('/kiosk/issue', function () {
-	return redirect()->route('kiosk.index');
+    return redirect()->route('kiosk.index');
 });
 Route::get('/kiosk/ticket/{ticket}', [KioskController::class, 'showTicket'])->name('kiosk.ticket');
 
@@ -48,7 +48,7 @@ Route::middleware(['auth'])->group(function () {
         }
         return redirect()->route('login')->withErrors(['error' => 'No counter assigned to your account.']);
     })->name('counter.index');
-    
+
     Route::get('/counter/{counter}', [CounterController::class, 'show'])->name('counter.show');
 
     // Counter actions
@@ -60,7 +60,7 @@ Route::middleware(['auth'])->group(function () {
     // Daily queue restart
     Route::get('/queue/restart', [RestartQueueController::class, 'index'])->name('queue.restart.index');
     Route::post('/queue/restart', [RestartQueueController::class, 'restart'])->name('queue.restart.run');
-    
+
     // Media management routes
     Route::get('/media', [MediaController::class, 'index'])->name('media.index');
     Route::post('/media', [MediaController::class, 'store'])->name('media.store');
@@ -68,6 +68,14 @@ Route::middleware(['auth'])->group(function () {
     Route::delete('/media/{id}', [MediaController::class, 'destroy'])->name('media.destroy');
     Route::patch('/media/{id}/toggle', [MediaController::class, 'toggleActive'])->name('media.toggleActive');
     Route::post('/media/order', [MediaController::class, 'updateOrder'])->name('media.updateOrder');
+
+    // Cutoff - on
+
+    Route::post('/counter/cutoff', [CounterController::class, 'cutoff'])
+        ->name('counter.cutoff');
+
+    Route::post('/counter/reopen', [CounterController::class, 'reopen'])
+        ->name('counter.reopen');
 });
 
 Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () {

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Counter;
 use App\Models\QueueTicket;
+use App\Models\QueueCutoff;
 use App\Events\TicketUpdated;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -57,7 +58,13 @@ class KioskController extends Controller
 
     public function index()
     {
-        return view('kiosk.index');
+        $closed = QueueCutoff::whereDate('cutoff_date', today())
+
+            ->where('is_closed', true)
+
+            ->exists();
+
+        return view('kiosk.index', compact('closed'));
     }
 
     public function chooseService(Request $request)
@@ -101,6 +108,28 @@ class KioskController extends Controller
 
     public function issueTicket(Request $request)
     {
+
+        $closed = QueueCutoff::whereDate('cutoff_date', today())
+
+            ->where('is_closed', true)
+
+            ->exists();
+
+        if ($closed) {
+
+            return redirect()
+
+                ->route('kiosk.index')
+
+                ->withErrors([
+
+                    'cutoff' => 'Queue ticket issuance has ended for today.'
+
+                ]);
+
+        }
+
+
         $validated = $request->validate([
             'service' => 'required|in:cashier,registrar',
             'program' => 'nullable|string|in:' . implode(',', array_keys(self::REGISTRAR_PROGRAMS)),
@@ -158,7 +187,7 @@ class KioskController extends Controller
         $countToday = $countQuery->count() + 1;
 
         // Create the sequence number
-        $sequence = str_pad((string)$countToday, 3, '0', STR_PAD_LEFT);
+        $sequence = str_pad((string) $countToday, 3, '0', STR_PAD_LEFT);
 
         // Final Code ( CS-001)
         $code = $prefix . '-' . $sequence;
@@ -211,14 +240,14 @@ class KioskController extends Controller
     {
         try {
             Log::info('Starting print job for ticket: ' . $ticket->code);
-            
+
             $printerType = config('app.printer_type', 'windows');
-            
+
             // Use HTTP printing if configured
             if ($printerType === 'http') {
                 return $this->printViaHttp($ticket);
             }
-            
+
             // Original ESC/POS printing for Windows
             // Guard: Skip printing if printer is offline to avoid OS spooling backlog
             $printerShareName = 'EPSON TM-T82II Receipt'; // Windows printer name
@@ -311,14 +340,14 @@ class KioskController extends Controller
     {
         try {
             $printerUrl = config('app.printer_target');
-            
+
             if (!$printerUrl) {
                 Log::error('PRINTER_TARGET not configured in .env');
                 return;
             }
-            
+
             Log::info('Sending print job via HTTP to: ' . $printerUrl);
-            
+
             // Prepare print data in the format expected by the print server
             $printData = [
                 'ticket' => [
@@ -329,11 +358,11 @@ class KioskController extends Controller
                     'created_at' => $ticket->created_at->toIso8601String(),
                 ],
             ];
-            
+
             // Send HTTP request to Windows print server
             $response = \Illuminate\Support\Facades\Http::timeout(5)
                 ->post($printerUrl, $printData);
-            
+
             if ($response->successful()) {
                 Log::info('Print job sent successfully via HTTP');
                 $responseData = $response->json();
@@ -341,7 +370,7 @@ class KioskController extends Controller
             } else {
                 Log::error('Print server returned error: ' . $response->status() . ' - ' . $response->body());
             }
-            
+
         } catch (\Illuminate\Http\Client\ConnectionException $e) {
             Log::error('Cannot connect to print server: ' . $e->getMessage());
             Log::error('Make sure the print server is running on the Windows 11 computer');
@@ -446,24 +475,24 @@ class KioskController extends Controller
             }
 
             $escapedName = addslashes($printerName);
-            
+
             // Check 1: Get printer status
             $psCommand = "(Get-Printer -Name '$escapedName' -ErrorAction SilentlyContinue).PrinterStatus";
             $cmd = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "' . $psCommand . '"';
-            
+
             Log::info('Executing PowerShell command for printer status');
 
             $output = @shell_exec($cmd);
-            
+
             Log::info('PowerShell printer status output: ' . var_export($output, true));
-            
+
             if ($output === null || $output === false) {
                 Log::warning('Printer status query returned null/false. Treating as offline to prevent printing.');
                 return false; // Block printing if we can't check status
             }
-            
+
             $statusRaw = trim($output);
-            
+
             if ($statusRaw === '') {
                 Log::warning('Printer status query returned empty. Treating as offline to prevent printing.');
                 return false; // Block if status unknown
@@ -473,11 +502,11 @@ class KioskController extends Controller
 
             // Check for problem statuses that should block printing
             $statusLower = strtolower($statusRaw);
-            
+
             // Block on: NotAvailable (disconnected/out of paper), Error, Offline, Paused
             // Also check for compound statuses like "PaperOut, NotAvailable"
             $blockedKeywords = ['notavailable', 'paperout', 'error', 'offline', 'paused'];
-            
+
             foreach ($blockedKeywords as $keyword) {
                 if (strpos($statusLower, $keyword) !== false) {
                     Log::info('Printer status indicates problem (contains "' . $keyword . '"): ' . $statusRaw . ' - blocking printing');
@@ -488,14 +517,14 @@ class KioskController extends Controller
             // Check 2: Look for stuck/error jobs in the queue
             $psJobCheck = "(Get-PrintJob -PrinterName '$escapedName' -ErrorAction SilentlyContinue | Where-Object { \$_.JobStatus -match 'Error|Paused|Blocked|Retained' }).Count";
             $cmdJobCheck = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "' . $psJobCheck . '"';
-            
+
             Log::info('Checking for error jobs in queue');
-            
+
             $jobOutput = @shell_exec($cmdJobCheck);
             $errorJobCount = intval(trim($jobOutput ?? '0'));
-            
+
             Log::info('Error job count: ' . $errorJobCount);
-            
+
             if ($errorJobCount > 0) {
                 Log::info('Found ' . $errorJobCount . ' stuck/error jobs in queue - blocking printing');
                 return false;

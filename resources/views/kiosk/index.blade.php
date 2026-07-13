@@ -5,6 +5,8 @@
     <meta charset="UTF-8">
     <title>Kiosk</title>
 
+    @vite(['resources/css/app.css', 'resources/js/app.js'])
+
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
 
     <style>
@@ -190,12 +192,13 @@
             <div class="col-md-7 ps-4 content-column">
 
                 @error('printer')
-                <div class="alert alert-danger fw-bold" role="alert" style="border:2px solid #ffbad6; box-shadow:0 3px 6px rgba(255,60,140,0.25)">
-                    <div class="d-flex align-items-center">
-                        <span class="me-2">⚠️</span>
-                        <span>{{ $message }}</span>
+                    <div class="alert alert-danger fw-bold" role="alert"
+                        style="border:2px solid #ffbad6; box-shadow:0 3px 6px rgba(255,60,140,0.25)">
+                        <div class="d-flex align-items-center">
+                            <span class="me-2">⚠️</span>
+                            <span>{{ $message }}</span>
+                        </div>
                     </div>
-                </div>
                 @enderror
 
                 <!-- LOGO -->
@@ -215,12 +218,11 @@
                     <li>Examination Permit</li>
                     <li>Purchase of P.E. Uniforms</li>
                 </ul>
-
                 <!-- CASHIER BUTTON -->
                 <form method="POST" action="{{ route('kiosk.service') }}">
                     @csrf
-                    <button name="service_type" value="cashier" class="btn service-btn mt-3">
-                        CASHIER
+                    <button id="cashierBtn" name="service_type" value="cashier" class="btn service-btn mt-3" {{ $closed ? 'disabled' : '' }}>
+                        {{ $closed ? 'QUEUE IS CLOSED FOR TODAY' : 'CASHIER' }}
                     </button>
                 </form>
 
@@ -234,14 +236,14 @@
                     <li>Honorable Dismissal</li>
                     <li>Certifications</li>
                     <li>Authentication</li>
-                    
+
                 </ul>
 
                 <!-- REGISTRAR BUTTON -->
                 <form method="POST" action="{{ route('kiosk.service') }}">
                     @csrf
-                    <button name="service_type" value="registrar" class="btn service-btn mt-3">
-                        REGISTRAR
+                    <button id="registrarBtn" name="service_type" value="registrar" class="btn service-btn mt-3" {{ $closed ? 'disabled' : '' }}>
+                        {{ $closed ? 'QUEUE IS CLOSED FOR TODAY' : 'REGISTRAR' }}
                     </button>
                 </form>
 
@@ -251,6 +253,36 @@
     </div>
 
     <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            if (!window.Echo) {
+                console.error('Echo is not available on the kiosk page.');
+                return;
+            }
+
+            const cashier = document.getElementById('cashierBtn');
+
+            const registrar = document.getElementById('registrarBtn');
+
+            const updateServiceButtons = (closed) => {
+                const closedLabel = 'QUEUE IS CLOSED FOR TODAY';
+
+                cashier.disabled = closed;
+                registrar.disabled = closed;
+                cashier.textContent = closed ? closedLabel : 'CASHIER';
+                registrar.textContent = closed ? closedLabel : 'REGISTRAR';
+            };
+
+            window.Echo.channel('queue.cutoff')
+
+                .listen('.cutoff.updated', (e) => {
+                    updateServiceButtons(!!e.closed);
+                });
+
+        });
+
+
+
+
         // // Sync left avatar box height to right content (up to registrar button)
         // function syncAvatarHeight() {
         //     try {
