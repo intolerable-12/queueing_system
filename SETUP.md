@@ -8,7 +8,7 @@ Laravel-based queueing system with three interfaces: **Kiosk**, **TV Monitor**, 
 - **TV Monitor**: Split-screen showing 4 counters per service with "now serving" codes and TTS announcements.
 - **Operator**: Cashier/Registrar select window, serve next ticket, on-hold functionality, auto-remove oldest on-hold after 3 nexts.
 - **Real-time**: Laravel Reverb broadcasts ticket state changes to monitor and operators.
-- **Printer**: EPSON TM-T82II printing via `mike42/escpos-php` (Windows Print Spooler or Network).
+- **Printer**: EPSON TM-T82II printing via HTTP to the Windows Python print server (`PrintServer/print-server.py`).
 
 ## Requirements
 
@@ -31,8 +31,8 @@ DB_CONNECTION=mysql
 DB_DATABASE=queueing_system
 BROADCAST_CONNECTION=reverb
 PRINTER_ENABLED=true
-PRINTER_TYPE=windows
-PRINTER_TARGET="EPSON TM-T82II"
+PRINTER_TYPE=http
+PRINTER_TARGET=http://WINDOWS_IP:3000/print
 ```
 
 3. Run migrations and seed counters:
@@ -81,8 +81,10 @@ php artisan test
 ## Printer Setup
 
 For EPSON TM-T82II:
-- **Windows**: Set `PRINTER_TYPE=windows` and `PRINTER_TARGET="EPSON TM-T82II"` (exact name in Windows Printers).
-- **Network**: Set `PRINTER_TYPE=network`, `PRINTER_TARGET=192.168.1.100`, `PRINTER_PORT=9100`.
+- **Recommended/Supported**: Use Python HTTP print server on the Windows USB-printer host.
+- Set `PRINTER_TYPE=http` and `PRINTER_TARGET=http://WINDOWS_IP:3000/print`.
+- Install Python service dependencies on Windows: `flask`, `pywin32`, `pillow`.
+- Follow `WINDOWS_PRINT_SERVER.md` for complete setup.
 
 ## Architecture
 

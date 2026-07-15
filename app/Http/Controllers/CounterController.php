@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Counter;
 use App\Models\QueueTicket;
+use App\Models\QueueCutoff;
+use App\Events\QueueCutoffUpdated;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
@@ -33,9 +35,9 @@ class CounterController extends Controller
             // Show registrar tickets that are either:
             // 1. Not assigned to a specific counter (designated_counter_id IS NULL) - any registrar can service
             // 2. Assigned to this specific counter (designated_counter_id = $counter->id) - only this counter
-            $query->where(function($q) use ($counter) {
+            $query->where(function ($q) use ($counter) {
                 $q->whereNull('designated_counter_id')
-                  ->orWhere('designated_counter_id', $counter->id);
+                    ->orWhere('designated_counter_id', $counter->id);
             });
         }
 
@@ -145,7 +147,7 @@ class CounterController extends Controller
         if ($priorityQueue->isEmpty()) {
             return $studentQueue;
         }
-        
+
         $startBucket = $this->getAlternatingStartBucket($serviceType, $counter, $studentQueue->first(), $priorityQueue->first());
         $result = collect();
         $turn = $startBucket;
@@ -174,12 +176,12 @@ class CounterController extends Controller
     public function select()
     {
         $userRole = Auth::user()->role;
-        
+
         // Only show counters matching user's role
         $counters = Counter::where('type', $userRole)
             ->orderBy('name')
             ->get();
-        
+
         return view('operator.select', compact('counters', 'userRole'));
     }
 
@@ -190,16 +192,16 @@ class CounterController extends Controller
         ]);
 
         $counter = Counter::findOrFail($validated['counter_id']);
-        
+
         // Check if counter type matches user's role
         if ($counter->type !== Auth::user()->role) {
             return back()->withErrors(['counter' => 'You cannot claim this counter type.']);
         }
-        
+
         if ($counter->claimed) {
             return back()->withErrors(['counter' => 'Counter already in use.']);
         }
-        
+
         $counter->claimed = true;
         $counter->save();
         return redirect()->route('counter.show', $counter);
@@ -208,7 +210,7 @@ class CounterController extends Controller
     public function release(Request $request)
     {
         $user = Auth::user();
-        
+
         if ($user && $user->counter_id) {
             $counter = $user->counter;
             if ($counter) {
@@ -216,7 +218,7 @@ class CounterController extends Controller
                 $counter->save();
             }
         }
-        
+
         return redirect()->route('login');
     }
 
@@ -227,7 +229,7 @@ class CounterController extends Controller
         if (!$user || $user->counter_id !== $counter->id) {
             abort(403, 'Unauthorized access to this counter.');
         }
-        
+
         $queue = $this->getPendingQueueAlternating($counter);
 
         $onHoldQuery = $this->todayTickets()->where('service_type', $counter->type)
@@ -256,16 +258,16 @@ class CounterController extends Controller
         // Server-side rate limiting: prevent rapid clicks (10 second cooldown)
         $lastNextTime = session('last_next_time_' . $counter->id);
         $now = now()->timestamp;
-        
+
         if ($lastNextTime && ($now - $lastNextTime) < 10) {
             return redirect()->route('counter.show', $counter)->withErrors([
                 'rate_limit' => 'Please wait before calling the next ticket.'
             ]);
         }
-        
+
         // Update last action time
         session(['last_next_time_' . $counter->id => $now]);
-        
+
         $currentTicket = null;
         //global alternation consistency - if multiple counters of same type call next at the same time, they will still alternate between student and priority based on the last called ticket of that service type, not based on their own last called ticket
         //serialize selection/assignment per service to keep global alternation consistent
@@ -314,7 +316,7 @@ class CounterController extends Controller
         // autoremove oldest on-hold after every 3 Next presses base on total calls
         static $nextPressCount = 0;
         $nextPressCount++;
-        
+
         $removed = false;
         if ($nextPressCount % 3 === 0) {
             $oldestHoldQuery = $this->todayTickets()->where('service_type', $counter->type)
@@ -338,16 +340,16 @@ class CounterController extends Controller
         // Server-side prevent rapid clicks (10 second cooldown)
         $lastHoldTime = session('last_hold_time_' . $counter->id);
         $now = now()->timestamp;
-        
+
         if ($lastHoldTime && ($now - $lastHoldTime) < 10) {
             return redirect()->route('counter.show', $counter)->withErrors([
                 'rate_limit' => 'Please wait before putting a ticket on hold.'
             ]);
         }
-        
+
         //update last action time
         session(['last_hold_time_' . $counter->id => $now]);
-        
+
         if ($ticket->status === 'serving' && $ticket->counter_id === $counter->id && $ticket->created_at->isToday() && $this->isTicketAllowedForCounter($counter, $ticket)) {
             $servedAfterHold = null;
 
@@ -392,21 +394,21 @@ class CounterController extends Controller
                     ->where('status', 'serving')
                     ->where('id', '!=', $ticket->id)
                     ->first();
-                
+
                 if ($currentlyServing) {
                     //put the currently serving ticket back to pending
                     $currentlyServing->status = 'pending';
                     $currentlyServing->counter_id = null;
                     $currentlyServing->save();
                 }
-                
+
                 //now serve the called ticket
                 $ticket->status = 'serving';
                 $ticket->counter_id = $counter->id;
                 $ticket->called_times = ($ticket->called_times ?? 0) + 1;
                 $ticket->save();
             });
-            
+
             event(new TicketUpdated('serving', $ticket));
         }
         return redirect()->route('counter.show', $counter);
@@ -422,4 +424,58 @@ class CounterController extends Controller
         }
         return redirect()->route('counter.show', $counter);
     }
+
+
+    public function cutoff()
+    {
+        QueueCutoff::updateOrCreate(
+
+            [
+                'cutoff_date' => today()
+            ],
+
+            [
+
+                'is_closed' => true,
+
+                'closed_by' => auth()->id(),
+
+                'closed_at' => now()
+
+            ]
+
+        );
+
+        event(new QueueCutoffUpdated(true));
+
+        return back()->with('success', 'Queue has been cut off.');
+    }
+
+    public function reopen()
+    {
+        QueueCutoff::updateOrCreate(
+
+            [
+                'cutoff_date' => today()
+            ],
+
+            [
+
+                'is_closed' => false,
+
+                'closed_by' => null,
+
+                'closed_at' => null
+
+            ]
+
+        );
+
+        event(new QueueCutoffUpdated(false));
+
+        return back()->with('success', 'Queue reopened.');
+    }
+
+
+
 }

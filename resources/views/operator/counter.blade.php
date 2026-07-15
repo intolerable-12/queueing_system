@@ -13,160 +13,10 @@
     <title>Counter</title>
 
     <style>
-        body {
-            background: #ffedf5;
-            margin: 0;
-            height: 100vh;
-        }
-
-        /* HEADER */
-        .header-bar {
-            background: linear-gradient(90deg, #ff4fa0, #ff82c4);
-            padding: 15px 30px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            box-shadow: 0 4px 10px rgba(255, 60, 140, 0.35);
-        }
-
-        .circle {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-            background-color: #fff;
-            background-image: url('/images/LCCDO.png');
-            background-size: cover;
-            background-position: center;
-            background-repeat: no-repeat;
-            margin-right: 20px;
-            border: 3px solid #ffbad6;
-        }
-
-        /* MAIN GRID */
-        .main-wrapper {
-            display: grid;
-            grid-template-columns: 70% 30%;
-            height: calc(100vh - 80px);
-        }
-
-        /* LEFT PANEL */
-        .left-panel {
-            padding: 40px;
-            position: relative;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .cashier-title {
-            font-size: 36px;
-            font-weight: bold;
-        }
-
-        .call-again-btn {
-            position: absolute;
-            top: 40px;
-            right: 40px;
-            left: auto;
-            transform: none;
-            background: #2d2d2d;
-            color: #fff;
-            border: none;
-            padding: 10px 28px;
-            border-radius: 6px;
-            font-weight: bold;
-        }
-
-        /* CENTER SERVING AREA */
-        .serving-center {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            text-align: center;
-        }
-
-        .serving-label {
-            letter-spacing: 2px;
-            font-weight: 600;
-            margin-bottom: 10px;
-        }
-
-        .serving-code {
-            font-size: 96px;
-            font-weight: 900;
-        }
-
-        .bottom-actions {
-            position: absolute;
-            bottom: 60px;
-            width: 100%;
-            display: flex;
-            justify-content: center;
-            gap: 80px;
-        }
-
-        .bottom-actions button {
-            padding: 14px 40px;
-            font-weight: bold;
-        }
-
-        /* RIGHT PANEL */
-        .right-panel {
-            background: #f1f1f1;
-            border-left: 2px solid #ccc;
-            padding: 20px;
-            overflow-y: auto;
-        }
-
-        .panel-title {
-            background: #d0d0d0;
-            padding: 8px;
-            text-align: center;
-            font-weight: bold;
-            margin-bottom: 10px;
-        }
-
-        .queue-list-container,
-        .onhold-list-container {
-            max-height: 240px;
-            overflow-y: auto;
-            margin-bottom: 1rem;
-        }
-
-        .queue-list-container::-webkit-scrollbar,
-        .onhold-list-container::-webkit-scrollbar {
-            width: 8px;
-        }
-
-        .queue-list-container::-webkit-scrollbar-track,
-        .onhold-list-container::-webkit-scrollbar-track {
-            background: #e0e0e0;
-            border-radius: 4px;
-        }
-
-        .queue-list-container::-webkit-scrollbar-thumb,
-        .onhold-list-container::-webkit-scrollbar-thumb {
-            background: #999;
-            border-radius: 4px;
-        }
-
-        .queue-list-container::-webkit-scrollbar-thumb:hover,
-        .onhold-list-container::-webkit-scrollbar-thumb:hover {
-            background: #777;
-        }
-
-        .next-badge {
-            display: inline-block;
-            background: #28a745;
-            color: white;
-            font-size: 10px;
-            font-weight: bold;
-            padding: 2px 8px;
-            border-radius: 3px;
-            margin-left: 8px;
-        }
+        
     </style>
+
+    <link rel="stylesheet" href="{{ asset('styles/counter.css') }}">
 </head>
 
 <body>
@@ -179,9 +29,44 @@
                 {{ ucfirst($counter->type) }} {{ $counter->name }}
             </h5>
         </div>
+        @php
+            $closed = \App\Models\QueueCutoff::whereDate('cutoff_date', today())
+                ->where('is_closed', true)
+                ->exists();
+        @endphp
 
         <div class="d-flex gap-2">
             <a href="{{ route('queue.restart.index') }}" class="btn btn-light fw-bold">Restart Queue</a>
+            @if(!$closed)
+
+                <form method="POST" action="{{ route('counter.cutoff') }}"
+                    onsubmit="return confirm('Stop accepting queue tickets for today?')">
+
+                    @csrf
+
+                    <button class="btn btn-warning fw-bold">
+
+                        CUT-OFF
+
+                    </button>
+
+                </form>
+
+            @else
+
+                <form method="POST" action="{{ route('counter.reopen') }}" onsubmit="return confirm('Reopen queue today?')">
+
+                    @csrf
+
+                    <button class="btn btn-success fw-bold">
+
+                        REOPEN
+
+                    </button>
+
+                </form>
+
+            @endif
             <a href="{{ route('media.index') }}" class="btn btn-light fw-bold">Manage TV Content</a>
             <form method="post" action="{{ route('logout') }}">
                 @csrf
@@ -198,10 +83,11 @@
 
             <!-- CALL AGAIN for currently serving: only show if nowServing exists -->
             @if($nowServing)
-            <form method="post" action="{{ route('counter.callAgain', [$counter->id, $nowServing->id]) }}" style="display:inline">
-                @csrf
-                <button type="submit" class="call-again-btn">CALL AGAIN</button>
-            </form>
+                <form method="post" action="{{ route('counter.callAgain', [$counter->id, $nowServing->id]) }}"
+                    style="display:inline">
+                    @csrf
+                    <button type="submit" class="call-again-btn">CALL AGAIN</button>
+                </form>
             @endif
 
             <!-- CENTERED SERVING -->
@@ -209,18 +95,18 @@
                 <div class="serving-label">CURRENTLY SERVING:</div>
 
                 @if($nowServing)
-                <div class="serving-code">{{ $nowServing->code }}</div>
+                    <div class="serving-code">{{ $nowServing->code }}</div>
                 @else
-                <div class="serving-code">—</div>
+                    <div class="serving-code">—</div>
                 @endif
             </div>
 
             <div class="bottom-actions">
                 @if($nowServing)
-                <form method="post" action="{{ route('counter.hold', [$counter->id, $nowServing->id]) }}">
-                    @csrf
-                    <button class="btn btn-dark">ON-HOLD</button>
-                </form>
+                    <form method="post" action="{{ route('counter.hold', [$counter->id, $nowServing->id]) }}">
+                        @csrf
+                        <button class="btn btn-dark">ON-HOLD</button>
+                    </form>
                 @endif
 
                 <form method="post" action="{{ route('counter.next', $counter->id) }}">
@@ -237,14 +123,14 @@
             <div class="queue-list-container">
                 <ul class="list-group mb-0">
                     @forelse($queue as $index => $t)
-                    <li class="list-group-item text-center fw-bold">
-                        {{ $t->code }}
-                        @if($index === 0 && !$nowServing)
-                        <span class="next-badge">NEXT</span>
-                        @endif
-                    </li>
+                        <li class="list-group-item text-center fw-bold">
+                            {{ $t->code }}
+                            @if($index === 0 && !$nowServing)
+                                <span class="next-badge">NEXT</span>
+                            @endif
+                        </li>
                     @empty
-                    <li class="list-group-item text-center">No tickets.</li>
+                        <li class="list-group-item text-center">No tickets.</li>
                     @endforelse
                 </ul>
             </div>
@@ -253,23 +139,23 @@
             <div class="onhold-list-container">
                 <ul class="list-group mb-0">
                     @forelse($onHold as $t)
-                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                        <span class="fw-bold">{{ $t->code }}</span>
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            <span class="fw-bold">{{ $t->code }}</span>
 
-                        <div class="btn-group">
-                            <form method="post" action="{{ route('counter.callAgain', [$counter->id, $t->id]) }}">
-                                @csrf
-                                <button type="submit" class="btn btn-success btn-sm">Call Again</button>
-                            </form>
-                            <form method="post" action="{{ route('counter.removeHold', [$counter->id, $t->id]) }}">
-                                @method('DELETE')
-                                @csrf
-                                <button class="btn btn-outline-danger btn-sm">✕</button>
-                            </form>
-                        </div>
-                    </li>
+                            <div class="btn-group">
+                                <form method="post" action="{{ route('counter.callAgain', [$counter->id, $t->id]) }}">
+                                    @csrf
+                                    <button type="submit" class="btn btn-success btn-sm">Call Again</button>
+                                </form>
+                                <form method="post" action="{{ route('counter.removeHold', [$counter->id, $t->id]) }}">
+                                    @method('DELETE')
+                                    @csrf
+                                    <button class="btn btn-outline-danger btn-sm">✕</button>
+                                </form>
+                            </div>
+                        </li>
                     @empty
-                    <li class="list-group-item text-center">No on-hold tickets.</li>
+                        <li class="list-group-item text-center">No on-hold tickets.</li>
                     @endforelse
                 </ul>
             </div>
@@ -292,7 +178,7 @@
             if (nextPressTime) {
                 const elapsed = Date.now() - parseInt(nextPressTime);
                 const remaining = 6000 - elapsed;
-                
+
                 if (remaining > 0) {
                     // Disable ON-HOLD button
                     const holdBtn = document.querySelector('.bottom-actions form[action*="hold"] button');
@@ -301,14 +187,14 @@
                         const originalText = holdBtn.textContent;
                         holdBtn.textContent = 'Wait...';
                         holdBtn.style.opacity = '0.6';
-                        
+
                         setTimeout(() => {
                             holdBtn.disabled = false;
                             holdBtn.textContent = originalText;
                             holdBtn.style.opacity = '1';
                         }, remaining);
                     }
-                    
+
                     // Disable NEXT button
                     const nextBtn = document.querySelector('.bottom-actions form[action*="next"] button');
                     if (nextBtn) {
@@ -316,7 +202,7 @@
                         const originalNextText = nextBtn.textContent;
                         nextBtn.textContent = 'Wait...';
                         nextBtn.style.opacity = '0.6';
-                        
+
                         setTimeout(() => {
                             nextBtn.disabled = false;
                             nextBtn.textContent = originalNextText;
@@ -330,24 +216,24 @@
             // Debounce for NEXT and ON-HOLD buttons
             const forms = document.querySelectorAll('.bottom-actions form, .left-panel > form');
             forms.forEach(form => {
-                form.addEventListener('submit', function(e) {
+                form.addEventListener('submit', function (e) {
                     const btn = this.querySelector('button[type="submit"]');
                     if (btn && btn.disabled) {
                         e.preventDefault();
                         return false;
                     }
-                    
+
                     // If this is the NEXT button, store timestamp
                     if (this.action.includes('next')) {
                         sessionStorage.setItem('nextPressTime_{{ $counter->id }}', Date.now().toString());
                     }
-                    
+
                     if (btn) {
                         btn.disabled = true;
                         const originalText = btn.textContent;
                         btn.textContent = 'Please wait...';
                         btn.style.opacity = '0.6';
-                        
+
                         // Re-enable after 10 seconds as fallback
                         setTimeout(() => {
                             btn.disabled = false;
