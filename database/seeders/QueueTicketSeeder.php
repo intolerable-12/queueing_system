@@ -10,11 +10,16 @@ class QueueTicketSeeder extends Seeder
     public function run(): void
     {
         $priorities = ['pwd_senior_pregnant', 'student', 'parent'];
+        $cashierPriorities = ['pwd_senior_pregnant', 'student', 'parent', 'clearance'];
         
-        // 10 Cashier tickets
-        for ($i = 1; $i <= 10; $i++) {
-            $priority = $priorities[($i - 1) % 3];
-            $prefix = 'C' . strtoupper(substr($priority, 0, 1));
+        // 12 Cashier tickets
+        for ($i = 1; $i <= 12; $i++) {
+            $priority = $cashierPriorities[($i - 1) % 4];
+            if ($priority === 'clearance') {
+                $prefix = 'CLR';
+            } else {
+                $prefix = 'C' . ($priority === 'student' ? 'S' : 'P');
+            }
             $code = $prefix . '-' . str_pad((string)$i, 3, '0', STR_PAD_LEFT);
             
             QueueTicket::firstOrCreate(

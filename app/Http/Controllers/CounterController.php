@@ -54,6 +54,44 @@ class CounterController extends Controller
         return $ticket->designated_counter_id === null || (int) $ticket->designated_counter_id === (int) $counter->id;
     }
 
+    protected function getPrioritiesForTab(string $activeTab): array
+    {
+        if ($activeTab === 'student') {
+            return ['student'];
+        } elseif ($activeTab === 'pwd_parent') {
+            return ['pwd_senior_pregnant', 'parent'];
+        } elseif ($activeTab === 'clearance') {
+            return ['clearance'];
+        }
+        return ['student'];
+    }
+
+    protected function getNextPendingTicketForTab(Counter $counter, string $activeTab): ?QueueTicket
+    {
+        $priorities = $this->getPrioritiesForTab($activeTab);
+        
+        $query = $this->todayTickets()
+            ->where('service_type', $counter->type)
+            ->where('status', 'pending')
+            ->whereIn('priority', $priorities)
+            ->orderBy('created_at', 'asc');
+            
+        return $this->scopeTicketsForCounter($query, $counter)->first();
+    }
+
+    protected function getPendingQueueForTab(Counter $counter, string $activeTab)
+    {
+        $priorities = $this->getPrioritiesForTab($activeTab);
+        
+        $query = $this->todayTickets()
+            ->where('service_type', $counter->type)
+            ->where('status', 'pending')
+            ->whereIn('priority', $priorities)
+            ->orderBy('created_at', 'asc');
+            
+        return $this->scopeTicketsForCounter($query, $counter)->get();
+    }
+
     protected function getLastCalledTicket(string $serviceType, Counter $counter): ?QueueTicket
     {
         $query = $this->todayTickets()->where('service_type', $serviceType)
@@ -230,9 +268,16 @@ class CounterController extends Controller
             abort(403, 'Unauthorized access to this counter.');
         }
 
-        $queue = $this->getPendingQueueAlternating($counter);
+        $activeTab = request()->input('tab', 'student');
+        if ($counter->type === 'registrar' && $activeTab === 'clearance') {
+            $activeTab = 'student';
+        }
 
+        $queue = $this->getPendingQueueForTab($counter, $activeTab);
+
+        $priorities = $this->getPrioritiesForTab($activeTab);
         $onHoldQuery = $this->todayTickets()->where('service_type', $counter->type)
+            ->whereIn('priority', $priorities)
             ->where(function ($query) {
                 $query->where('status', 'on_hold')
                     ->orWhere(function ($q) {
@@ -250,17 +295,53 @@ class CounterController extends Controller
             ->latest()
             ->first();
 
-        return view('operator.counter', compact('counter', 'queue', 'onHold', 'nowServing'));
+        // Calculate badge counts for the tabs
+        $studentCount = $this->scopeTicketsForCounter(
+            $this->todayTickets()
+                ->where('service_type', $counter->type)
+                ->where('status', 'pending')
+                ->where('priority', 'student'),
+            $counter
+        )->count();
+
+        $pwdParentCount = $this->scopeTicketsForCounter(
+            $this->todayTickets()
+                ->where('service_type', $counter->type)
+                ->where('status', 'pending')
+                ->whereIn('priority', ['pwd_senior_pregnant', 'parent']),
+            $counter
+        )->count();
+
+        $clearanceCount = 0;
+        if ($counter->type === 'cashier') {
+            $clearanceCount = $this->scopeTicketsForCounter(
+                $this->todayTickets()
+                    ->where('service_type', $counter->type)
+                    ->where('status', 'pending')
+                    ->where('priority', 'clearance'),
+                $counter
+            )->count();
+        }
+
+        return view('operator.counter', compact(
+            'counter', 'queue', 'onHold', 'nowServing', 'activeTab',
+            'studentCount', 'pwdParentCount', 'clearanceCount'
+        ));
     }
 
     public function next(Counter $counter)
     {
+        $activeTab = request()->input('tab', 'student');
+        if ($counter->type === 'registrar' && $activeTab === 'clearance') {
+            $activeTab = 'student';
+        }
+
         // Server-side rate limiting: prevent rapid clicks (10 second cooldown)
         $lastNextTime = session('last_next_time_' . $counter->id);
         $now = now()->timestamp;
 
         if ($lastNextTime && ($now - $lastNextTime) < 10) {
-            return redirect()->route('counter.show', $counter)->withErrors([
+            return redirect()->route('counter.show', [$counter->id, 'tab' => $activeTab])->withErrors([
                 'rate_limit' => 'Please wait before calling the next ticket.'
             ]);
         }
@@ -269,10 +350,10 @@ class CounterController extends Controller
         session(['last_next_time_' . $counter->id => $now]);
 
         $currentTicket = null;
-        //global alternation consistency - if multiple counters of same type call next at the same time, they will still alternate between student and priority based on the last called ticket of that service type, not based on their own last called ticket
-        //serialize selection/assignment per service to keep global alternation consistent
-        $this->withServiceLock($counter->type, function () use ($counter, &$nextTicket, &$currentTicket) {
-            DB::transaction(function () use ($counter, &$nextTicket, &$currentTicket) {
+        $nextTicket = null;
+
+        $this->withServiceLock($counter->type, function () use ($counter, $activeTab, &$nextTicket, &$currentTicket) {
+            DB::transaction(function () use ($counter, $activeTab, &$nextTicket, &$currentTicket) {
                 // Mark currently serving ticket as done 
                 $currentTicket = QueueTicket::where('counter_id', $counter->id)
                     ->where('status', 'serving')
@@ -284,8 +365,8 @@ class CounterController extends Controller
                     $currentTicket->save();
                 }
 
-                // Get next pending ticket using alternating student/priority strategy
-                $nextTicket = $this->getNextPendingTicketAlternating($counter);
+                // Get next pending ticket using active tab strategy
+                $nextTicket = $this->getNextPendingTicketForTab($counter, $activeTab);
 
                 if ($nextTicket) {
                     // this ensures same ticket not served by another counter
@@ -308,7 +389,7 @@ class CounterController extends Controller
 
         if (!$nextTicket) {
             // No more tickets - just return without serving anything
-            return redirect()->route('counter.show', $counter)->with('status', 'No pending ticket.');
+            return redirect()->route('counter.show', [$counter->id, 'tab' => $activeTab])->with('status', 'No pending ticket.');
         }
 
         event(new TicketUpdated('serving', $nextTicket));
@@ -319,8 +400,10 @@ class CounterController extends Controller
 
         $removed = false;
         if ($nextPressCount % 3 === 0) {
+            $priorities = $this->getPrioritiesForTab($activeTab);
             $oldestHoldQuery = $this->todayTickets()->where('service_type', $counter->type)
                 ->where('status', 'on_hold')
+                ->whereIn('priority', $priorities)
                 ->orderBy('updated_at', 'asc');
 
             $oldestHold = $this->scopeTicketsForCounter($oldestHoldQuery, $counter)->first();
@@ -332,17 +415,22 @@ class CounterController extends Controller
             }
         }
 
-        return redirect()->route('counter.show', $counter)->with('status', $removed ? 'Oldest on-hold removed.' : 'Serving next.');
+        return redirect()->route('counter.show', [$counter->id, 'tab' => $activeTab])->with('status', $removed ? 'Oldest on-hold removed.' : 'Serving next.');
     }
 
     public function hold(Counter $counter, QueueTicket $ticket)
     {
+        $activeTab = request()->input('tab', 'student');
+        if ($counter->type === 'registrar' && $activeTab === 'clearance') {
+            $activeTab = 'student';
+        }
+
         // Server-side prevent rapid clicks (10 second cooldown)
         $lastHoldTime = session('last_hold_time_' . $counter->id);
         $now = now()->timestamp;
 
         if ($lastHoldTime && ($now - $lastHoldTime) < 10) {
-            return redirect()->route('counter.show', $counter)->withErrors([
+            return redirect()->route('counter.show', [$counter->id, 'tab' => $activeTab])->withErrors([
                 'rate_limit' => 'Please wait before putting a ticket on hold.'
             ]);
         }
@@ -354,16 +442,16 @@ class CounterController extends Controller
             $servedAfterHold = null;
 
             // Serialize selection/assignment per service 
-            $this->withServiceLock($counter->type, function () use ($counter, $ticket, &$servedAfterHold) {
-                DB::transaction(function () use ($counter, $ticket, &$servedAfterHold) {
+            $this->withServiceLock($counter->type, function () use ($counter, $ticket, $activeTab, &$servedAfterHold) {
+                DB::transaction(function () use ($counter, $ticket, $activeTab, &$servedAfterHold) {
                     // Mark current ticket as on-hold
                     $ticket->status = 'on_hold';
                     $ticket->hold_count = ($ticket->hold_count ?? 0) + 1;
                     $ticket->counter_id = null; // Release from this counter
                     $ticket->save();
 
-                    //automatically serve the next pending ticket using alternating strategy
-                    $nextTicket = $this->getNextPendingTicketAlternating($counter);
+                    //automatically serve the next pending ticket using active tab strategy
+                    $nextTicket = $this->getNextPendingTicketForTab($counter, $activeTab);
 
                     if ($nextTicket) {
                         $nextTicket->status = 'serving';
@@ -381,11 +469,12 @@ class CounterController extends Controller
                 event(new TicketUpdated('serving', $servedAfterHold));
             }
         }
-        return redirect()->route('counter.show', $counter);
+        return redirect()->route('counter.show', [$counter->id, 'tab' => $activeTab]);
     }
 
     public function callAgain(Counter $counter, QueueTicket $ticket)
     {
+        $activeTab = request()->input('tab', 'student');
         if (in_array($ticket->status, ['on_hold', 'serving'], true) && $ticket->service_type === $counter->type && $ticket->created_at->isToday() && $this->isTicketAllowedForCounter($counter, $ticket)) {
             //use transaction mysql function to handle both the current serving ticket and the called ticket
             DB::transaction(function () use ($counter, $ticket) {
@@ -411,18 +500,19 @@ class CounterController extends Controller
 
             event(new TicketUpdated('serving', $ticket));
         }
-        return redirect()->route('counter.show', $counter);
+        return redirect()->route('counter.show', [$counter->id, 'tab' => $activeTab]);
     }
 
     // remove hold from hold list
     public function removeHold(Counter $counter, QueueTicket $ticket)
     {
+        $activeTab = request()->input('tab', 'student');
         if (in_array($ticket->status, ['on_hold', 'serving'], true) && $ticket->service_type === $counter->type && $ticket->created_at->isToday() && $this->isTicketAllowedForCounter($counter, $ticket)) {
             $ticket->status = 'done';
             $ticket->save();
             event(new TicketUpdated('done', $ticket));
         }
-        return redirect()->route('counter.show', $counter);
+        return redirect()->route('counter.show', [$counter->id, 'tab' => $activeTab]);
     }
 
 

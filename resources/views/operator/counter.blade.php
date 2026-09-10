@@ -13,7 +13,59 @@
     <title>Counter</title>
 
     <style>
-        
+        #queue-tabs {
+            border-bottom: 2px solid #ffbad6;
+            padding-bottom: 10px;
+            margin-bottom: 15px !important;
+        }
+        #queue-tabs .nav-link {
+            color: #ff4fa0;
+            font-weight: bold;
+            border: 2px solid #ffbad6;
+            background-color: #fff;
+            transition: all 0.3s ease;
+            border-radius: 20px;
+            padding: 8px 16px;
+            font-size: 0.95rem;
+            display: flex;
+            align-items: center;
+        }
+        #queue-tabs .nav-link.active {
+            background: linear-gradient(90deg, #ff4fa0, #ff82c4);
+            color: white;
+            border-color: transparent;
+            box-shadow: 0 4px 8px rgba(255, 60, 140, 0.25);
+        }
+        #queue-tabs .nav-link:hover:not(.active) {
+            background-color: #ffedf5;
+            border-color: #ff4fa0;
+            transform: translateY(-1px);
+        }
+        #queue-tabs .badge {
+            font-size: 0.8rem;
+            border-radius: 20px;
+            padding: 4px 8px;
+            transition: all 0.3s ease;
+            color: white !important;
+        }
+        #queue-tabs .badge-student {
+            background-color: #10b981; /* Green */
+        }
+        #queue-tabs .badge-pwd-parent {
+            background-color: #f59e0b; /* Orange */
+        }
+        #queue-tabs .badge-clearance {
+            background-color: #f43f5e; /* Red */
+        }
+        .right-panel {
+            display: flex;
+            flex-direction: column;
+        }
+        .queue-list-container, .onhold-list-container {
+            flex: 1;
+            min-height: 150px;
+            max-height: calc(50vh - 120px);
+        }
     </style>
 
     <link rel="stylesheet" href="{{ asset('styles/counter.css') }}">
@@ -83,7 +135,7 @@
 
             <!-- CALL AGAIN for currently serving: only show if nowServing exists -->
             @if($nowServing)
-                <form method="post" action="{{ route('counter.callAgain', [$counter->id, $nowServing->id]) }}"
+                <form method="post" action="{{ route('counter.callAgain', [$counter->id, $nowServing->id]) }}?tab={{ $activeTab }}"
                     style="display:inline">
                     @csrf
                     <button type="submit" class="call-again-btn">CALL AGAIN</button>
@@ -103,13 +155,13 @@
 
             <div class="bottom-actions">
                 @if($nowServing)
-                    <form method="post" action="{{ route('counter.hold', [$counter->id, $nowServing->id]) }}">
+                    <form method="post" action="{{ route('counter.hold', [$counter->id, $nowServing->id]) }}?tab={{ $activeTab }}">
                         @csrf
                         <button class="btn btn-dark">ON-HOLD</button>
                     </form>
                 @endif
 
-                <form method="post" action="{{ route('counter.next', $counter->id) }}">
+                <form method="post" action="{{ route('counter.next', $counter->id) }}?tab={{ $activeTab }}">
                     @csrf
                     <button class="btn btn-dark">NEXT</button>
                 </form>
@@ -118,6 +170,30 @@
 
         <!-- RIGHT -->
         <div class="right-panel">
+
+            <!-- TABS -->
+            <ul class="nav nav-pills mb-3 justify-content-center" id="queue-tabs" role="tablist" style="gap: 8px;">
+                <li class="nav-item" role="presentation">
+                    <a class="nav-link {{ $activeTab === 'student' ? 'active' : '' }}" href="{{ route('counter.show', [$counter->id, 'tab' => 'student']) }}">
+                        Student
+                        <span class="badge badge-student ms-1">{{ $studentCount }}</span>
+                    </a>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <a class="nav-link {{ $activeTab === 'pwd_parent' ? 'active' : '' }}" href="{{ route('counter.show', [$counter->id, 'tab' => 'pwd_parent']) }}">
+                        PWD/Parent
+                        <span class="badge badge-pwd-parent ms-1">{{ $pwdParentCount }}</span>
+                    </a>
+                </li>
+                @if($counter->type === 'cashier')
+                    <li class="nav-item" role="presentation">
+                        <a class="nav-link {{ $activeTab === 'clearance' ? 'active' : '' }}" href="{{ route('counter.show', [$counter->id, 'tab' => 'clearance']) }}">
+                            Clearance
+                            <span class="badge badge-clearance ms-1">{{ $clearanceCount }}</span>
+                        </a>
+                    </li>
+                @endif
+            </ul>
 
             <div class="panel-title">QUEUE</div>
             <div class="queue-list-container">
@@ -143,11 +219,11 @@
                             <span class="fw-bold">{{ $t->code }}</span>
 
                             <div class="btn-group">
-                                <form method="post" action="{{ route('counter.callAgain', [$counter->id, $t->id]) }}">
+                                <form method="post" action="{{ route('counter.callAgain', [$counter->id, $t->id]) }}?tab={{ $activeTab }}">
                                     @csrf
                                     <button type="submit" class="btn btn-success btn-sm">Call Again</button>
                                 </form>
-                                <form method="post" action="{{ route('counter.removeHold', [$counter->id, $t->id]) }}">
+                                <form method="post" action="{{ route('counter.removeHold', [$counter->id, $t->id]) }}?tab={{ $activeTab }}">
                                     @method('DELETE')
                                     @csrf
                                     <button class="btn btn-outline-danger btn-sm">✕</button>

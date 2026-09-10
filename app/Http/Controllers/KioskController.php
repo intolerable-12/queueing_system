@@ -133,15 +133,20 @@ class KioskController extends Controller
         $validated = $request->validate([
             'service' => 'required|in:cashier,registrar',
             'program' => 'nullable|string|in:' . implode(',', array_keys(self::REGISTRAR_PROGRAMS)),
-            'priority' => 'required|in:pwd_senior_pregnant,student,parent',
+            'priority' => 'required|in:pwd_senior_pregnant,student,parent,clearance',
         ]);
+
+        if ($validated['priority'] === 'clearance' && $validated['service'] !== 'cashier') {
+            return redirect()->route('kiosk.index')->withErrors([
+                'priority' => 'Clearance option is only available for Cashier service.'
+            ]);
+        }
 
         $programKey = null;
         $designatedCounterId = null;
 
-        // For registrar, don't assign to specific counter - any registrar counter can service it
+        // For registrar, don't assign to specific counter - any registrar can service it
         // (For cashier, $designatedCounterId remains null as well, meaning any cashier can service it)
-
         // If printing is enabled, ensure printer is online / ready before generating a code
         // Skip validation if SKIP_PRINTER_VALIDATION is enabled (for development/testing)
         if (config('app.printer_enabled', false) && !config('app.skip_printer_validation', false)) {
@@ -168,20 +173,27 @@ class KioskController extends Controller
         }
 
         // Generate prefix and sequence bucket
-        // Student keeps S-series, all non-student priorities share P-series
+        // Student keeps S-series, all non-student priorities share P-series, Clearance gets CLR
         $isStudent = $validated['priority'] === 'student';
-        $priorityPrefix = $isStudent ? 'S' : 'P';
+        $isClearance = $validated['priority'] === 'clearance';
 
-        $prefix = strtoupper(substr($validated['service'], 0, 1)) . $priorityPrefix;
+        if ($isClearance) {
+            $prefix = 'CLR';
+        } else {
+            $priorityPrefix = $isStudent ? 'S' : 'P';
+            $prefix = strtoupper(substr($validated['service'], 0, 1)) . $priorityPrefix;
+        }
 
         // Reset daily: count only today's tickets for this service and bucket
         $countQuery = QueueTicket::where('service_type', $validated['service'])
             ->whereDate('created_at', today());
 
-        if ($isStudent) {
+        if ($isClearance) {
+            $countQuery->where('priority', 'clearance');
+        } elseif ($isStudent) {
             $countQuery->where('priority', 'student');
         } else {
-            $countQuery->where('priority', '!=', 'student');
+            $countQuery->whereNotIn('priority', ['student', 'clearance']);
         }
 
         $countToday = $countQuery->count() + 1;
@@ -189,7 +201,7 @@ class KioskController extends Controller
         // Create the sequence number
         $sequence = str_pad((string) $countToday, 3, '0', STR_PAD_LEFT);
 
-        // Final Code ( CS-001)
+        // Final Code ( CS-001 or CLR-001 )
         $code = $prefix . '-' . $sequence;
 
         // Save ticket
