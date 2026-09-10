@@ -330,6 +330,7 @@
             <!-- COLUMN 1: PWD/SENIOR/PREGNANT -->
             <div class="button-column">
                 <ul>
+                    <p>Cashier transaction for:</p>
                     <li>Persons with disabilities</li>
                     <li>60+ years old</li>
                     <li>Pregnant Woman</li>
@@ -338,12 +339,13 @@
                 </ul>
                 <button type="button" class="btn priority-btn"
                     onclick="showConfirmModal('{{ $service }}', 'pwd_senior_pregnant', 'PWD/SENIOR/PREGNANT')">
-                    PWD/SENIOR/PREGNANT/PARENT
+                    PRIORITY
                 </button>
             </div>
             <!-- COLUMN 2: STUDENT -->
             <div class="button-column">
                 <ul>
+                    <p>Cashier transaction for:</p>
                     <li>Senior High</li>
                     <li>College</li>
                     <li>Graduate School</li>
@@ -354,18 +356,19 @@
                     STUDENT
                 </button>
             </div>
-            <!-- COLUMN 3: PARENT -->
-            <!-- <div class="button-column">
+            @if($service === 'cashier')
+            <!-- COLUMN 3: CLEARANCE -->
+            <div class="button-column">
                 <ul>
-                    <li>Parent of a student</li>
-                    <li>Legal guardian of a student</li>
-                    <li>Responsible family member of a student</li>
-                    
+                    <li>Student Clearance</li>
+
                 </ul>
-                <button type="button" class="btn priority-btn" onclick="showConfirmModal('{{ $service }}', 'parent', 'PARENT')">
-                    PARENT
+                <button type="button" class="btn priority-btn"
+                    onclick="showConfirmModal('{{ $service }}', 'clearance', 'CLEARANCE')">
+                    CLEARANCE
                 </button>
-            </div> -->
+            </div>
+            @endif
         </div>
         <div style="height:50px"></div>
 
